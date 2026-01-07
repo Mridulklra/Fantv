@@ -1,0 +1,90 @@
+# ============================================
+# DOCKER COMPOSE CONFIGURATION
+# WHY DOCKER: Ensures consistent environment
+# Same setup works on dev, staging, production
+# ============================================
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  # WHY: Reliable relational database for structured data
+  # Stores: users, videos, events, analytics_results
+  postgres:
+    image: postgres:15-alpine
+    container_name: fantv_postgres
+    environment:
+      POSTGRES_USER: fantv_user
+      POSTGRES_PASSWORD: fantv_password
+      POSTGRES_DB: fantv_analytics
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fantv_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  # WHY: Ultra-fast in-memory cache for hot data
+  # Caches: popular videos, real-time counters, session data
+  redis:
+    image: redis:7-alpine
+    container_name: fantv_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Node.js Backend
+  # WHY: Handles REST API + WebSocket connections
+  nodejs_backend:
+    build: ./backend-nodejs
+    container_name: fantv_nodejs
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - DATABASE_URL=postgresql://fantv_user:fantv_password@postgres:5432/fantv_analytics
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your_super_secret_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend-nodejs:/app
+      - /app/node_modules
+    command: npm start
+
+  # Python Analytics Engine
+  # WHY: Handles complex data processing & analytics
+  python_analytics:
+    build: ./analytics-python
+    container_name: fantv_python
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://fantv_user:fantv_password@postgres:5432/fantv_analytics
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./analytics-python:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
+  redis_data:
